@@ -401,6 +401,16 @@ export default class RaceScene extends Phaser.Scene {
       })
       .setOrigin(0.5)
       .setDepth(30);
+    if (this.mode !== 'daily') {
+      this.add
+        .text(VIEW_WIDTH / 2, VIEW_HEIGHT / 2 + 56, 'ждём соперников…', {
+          fontFamily: 'sans-serif',
+          fontSize: '22px',
+          color: '#9aa3b2',
+        })
+        .setOrigin(0.5)
+        .setDepth(30);
+    }
     this.phase = 'finished';
   }
 

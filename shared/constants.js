@@ -57,6 +57,11 @@ export const ATTACK_COOLDOWN_MS = 3000;
 export const COUNTDOWN_MS = 3000; // 3..2..1..GO
 export const PROGRESS_TICK_MS = 100; // how often the client reports progress
 export const MAX_PLAYERS = 6;
+// After the first finisher, the rest get this long to cross the line before
+// the race is force-ended (stragglers rank by distance). Guards against a
+// player whose tab went to background: the browser freezes rAF, so their car
+// never moves and never finishes — without this the race would hang forever.
+export const FINISH_GRACE_MS = 15000;
 
 // Room codes.
 export const ROOM_CODE_LENGTH = 4;

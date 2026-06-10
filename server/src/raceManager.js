@@ -5,6 +5,7 @@
 import {
   COUNTDOWN_MS,
   FINISH_DISTANCE,
+  FINISH_GRACE_MS,
   MIN_PLAUSIBLE_FINISH_MS,
   LANES,
   ENTITY,
@@ -136,10 +137,21 @@ export class RaceManager {
     p.distance = room.race.finishDistance;
     room.race.finishOrder.push(socketId);
 
-    // Race ends when every connected player has finished.
+    // Race ends when every connected player has finished…
     const allFinished = [...room.race.progress.values()].every((x) => x.finished);
     if (allFinished) {
       this.endRace(room);
+      return;
+    }
+
+    // …or FINISH_GRACE_MS after the first finisher. A backgrounded tab freezes
+    // its game loop and would otherwise stall the race for everyone forever.
+    if (!room.race.graceTimer) {
+      const race = room.race;
+      race.graceTimer = setTimeout(() => {
+        if (room.race === race) this.endRace(room);
+      }, FINISH_GRACE_MS);
+      race.graceTimer.unref?.();
     }
   }
 
@@ -147,6 +159,7 @@ export class RaceManager {
   endRace(room) {
     if (!room.race || room.race.done) return;
     room.race.done = true;
+    if (room.race.graceTimer) clearTimeout(room.race.graceTimer);
 
     const ranking = this.buildRanking(room);
     const isDaily = room.race.mode === 'daily';
