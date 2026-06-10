@@ -3,7 +3,7 @@ import { defineConfig, devices } from '@playwright/test';
 // E2E runs against the PRODUCTION build served by the Node server on a single
 // origin (so websockets work exactly like in deployment). The webServer block
 // builds the client and starts the server before the suite runs.
-const PORT = 3100; // avoid clashing with a dev server on 3000
+const PORT = Number(process.env.E2E_PORT) || 3100; // avoid clashing with a dev server on 3000
 
 export default defineConfig({
   testDir: './tests/e2e',
