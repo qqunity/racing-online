@@ -8,6 +8,9 @@ import {
   ENTITY,
   PROGRESS_TICK_MS,
   laneCenterX,
+  CAR_W,
+  CAR_H,
+  POWERUP_SIZE,
 } from '@shared/constants.js';
 import { generateTrack, trackFingerprint } from '@shared/track.js';
 import { socket, net, reportProgress, reportFinished } from '../net/socket.js';
@@ -19,7 +22,6 @@ import { Hud } from '../ui/hud.js';
 const PX_PER_METRE = 1.4;
 const PLAYER_Y = VIEW_HEIGHT - 130;
 const STRIPE_SPACING = 64;
-const CAR_H = LANE_WIDTH * 0.62 * 1.7;
 
 export default class RaceScene extends Phaser.Scene {
   constructor() {
@@ -174,7 +176,12 @@ export default class RaceScene extends Phaser.Scene {
       const screenY = PLAYER_Y - (e.dist - this.distance) * PX_PER_METRE;
       const visible = screenY > -60 && screenY < VIEW_HEIGHT + 60;
       if (visible && !e.sprite) {
-        e.sprite = this.add.image(laneCenterX(e.lane), screenY, textureFor(e.kind)).setDepth(4);
+        e.sprite = this.add.image(laneCenterX(e.lane), screenY, textureFor(e)).setDepth(4);
+        if (e.kind === ENTITY.TRAFFIC) {
+          e.sprite.setDisplaySize(CAR_W, CAR_H);
+        } else {
+          e.sprite.setDisplaySize(POWERUP_SIZE, POWERUP_SIZE);
+        }
       }
       if (e.sprite) {
         e.sprite.y = screenY;
@@ -300,8 +307,15 @@ export default class RaceScene extends Phaser.Scene {
   }
 }
 
-function textureFor(kind) {
-  if (kind === ENTITY.NITRO) return 'pu-nitro';
-  if (kind === ENTITY.OIL) return 'pu-oil';
-  return 'car-traffic';
+// Traffic colour variants. Chosen per car by a hash of its (deterministic,
+// shared) entity id, so every client paints the same car the same colour
+// without touching shared track generation or the fairness fingerprint.
+const TRAFFIC_TEXTURES = ['car-traffic', 'car-traffic-blue', 'car-traffic-yellow', 'car-traffic-grey'];
+
+function textureFor(e) {
+  if (e.kind === ENTITY.NITRO) return 'pu-nitro';
+  if (e.kind === ENTITY.OIL) return 'pu-oil';
+  // Knuth multiplicative hash to scramble consecutive ids into a varied mix.
+  const idx = ((e.id * 2654435761) >>> 0) % TRAFFIC_TEXTURES.length;
+  return TRAFFIC_TEXTURES[idx];
 }

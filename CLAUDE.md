@@ -19,6 +19,17 @@ Guidance for working in this repository.
   → Result. Меню/лобби/результаты — HTML-оверлеи (`client/src/ui/dom.js`) с
   атрибутами `data-testid` (нужны для Playwright). Ядро геймплея —
   `client/src/scenes/RaceScene.js`.
+- **Спрайты** — PNG-арт из CC0-набора Kenney.nl лежит в `client/public/sprites/`
+  (Vite раздаёт `public/` с корня и копирует в `dist` при сборке). `BootScene`
+  грузит их в `preload()` под ключами `car-player/car-traffic/pu-nitro/pu-oil`.
+  Реальный размер картинки не влияет на геймплей: отображаемый размер задаётся
+  через `setDisplaySize()` константами `CAR_W/CAR_H/POWERUP_SIZE` из
+  `shared/constants.js` (там же считаются коллизии). Заменить арт = положить
+  новый PNG под тем же именем; менять ключи текстур нельзя — на них завязаны
+  `car.js` и `RaceScene`. Трафик бывает разных цветов (`TRAFFIC_TEXTURES` в
+  `RaceScene`): вариант выбирается хешем от детерминированного `entity.id`, т.е.
+  цвет одинаков у всех игроков и **не трогает** генерацию трассы в `shared/`
+  и `trackFingerprint`.
 - **Сервер** — Node.js + Express + Socket.IO (`server/`). `rooms.js` —
   `RoomManager` (комнаты в памяти, коды, лобби, переназначение хоста).
   `raceManager.js` — жизненный цикл гонки (seed, отсчёт, прогресс, ранжирование,

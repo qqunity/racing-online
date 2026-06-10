@@ -15,6 +15,13 @@ export function laneCenterX(lane) {
   return ROAD_MARGIN + LANE_WIDTH * lane + LANE_WIDTH / 2;
 }
 
+// On-screen sprite footprint (px). Loaded art is scaled to these via
+// setDisplaySize so its native resolution doesn't affect gameplay; collisions
+// in RaceScene are computed from CAR_H / LANE_WIDTH, not the texture size.
+export const CAR_W = LANE_WIDTH * 0.62;
+export const CAR_H = CAR_W * 1.7;
+export const POWERUP_SIZE = LANE_WIDTH * 0.72;
+
 // Distance is measured in abstract "metres". The world scrolls downward as the
 // player advances, so distance == how far the player has driven.
 export const FINISH_DISTANCE = 3000;
