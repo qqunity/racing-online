@@ -1,9 +1,10 @@
 import Phaser from 'phaser';
 import { createOverlay } from '../ui/dom.js';
-import { socket, net, leaveRoom } from '../net/socket.js';
+import { socket, net, startRace, leaveRoom } from '../net/socket.js';
 
-// Final standings after a race. Host can start another race (back to lobby);
-// everyone can leave to the menu.
+// Final standings after a race. Host can start a rematch right from here (or
+// go back to the lobby); everyone can leave to the menu. The series score
+// (seriesWins per player) lives with the room and is shown under the table.
 export default class ResultScene extends Phaser.Scene {
   constructor() {
     super('Result');
@@ -11,10 +12,20 @@ export default class ResultScene extends Phaser.Scene {
 
   init(data) {
     this.ranking = (data && data.ranking) || [];
+    // Актуальный состав комнаты со счётом серии (приходит в raceResults).
+    this.series = (data && data.series) || [];
   }
 
   create() {
     this.add.rectangle(0, 0, this.scale.width, this.scale.height, 0x2b2f3a).setOrigin(0);
+
+    // raceResults несёт свежий состав комнаты — синхронизируем net,
+    // чтобы не зависеть от устаревшего состояния из лобби.
+    if (this.series.length) {
+      net.players = this.series;
+      const host = this.series.find((p) => p.isHost);
+      if (host) net.hostId = host.id;
+    }
 
     const rowsHtml = this.ranking
       .map((r) => {
@@ -35,6 +46,9 @@ export default class ResultScene extends Phaser.Scene {
       <h1 data-testid="result-title">${youWon ? '🏆 Победа!' : '🏁 Финиш'}</h1>
       <h2>${winner ? `Победитель: ${escapeHtml(winner.name)}` : 'Результаты'}</h2>
       ${rowsHtml}
+      <label>Счёт серии</label>
+      <div data-testid="series-score"></div>
+      <div data-testid="rematch-area"></div>
       <button class="ui-btn" data-testid="again-btn">В лобби</button>
       <button class="ui-btn secondary" data-testid="result-leave-btn">Выйти в меню</button>
     `);
@@ -45,6 +59,16 @@ export default class ResultScene extends Phaser.Scene {
       this.scene.start('Menu');
     });
 
+    // Состав комнаты меняется прямо на экране результатов: кто-то вышел
+    // (включая хоста — сервер промоутит нового) или зашёл по коду.
+    this.onRoomUpdate = ({ players, hostId }) => {
+      net.players = players;
+      net.hostId = hostId;
+      this.series = players;
+      this.render();
+    };
+    socket.on('roomUpdate', this.onRoomUpdate);
+
     // If the host kicks off another race while we're on this screen.
     this.onRaceStarting = (cfg) => {
       net.lastRaceConfig = cfg;
@@ -52,10 +76,38 @@ export default class ResultScene extends Phaser.Scene {
     };
     socket.on('raceStarting', this.onRaceStarting);
 
+    this.render();
+
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      socket.off('roomUpdate', this.onRoomUpdate);
       socket.off('raceStarting', this.onRaceStarting);
       if (this.ui) this.ui.destroy();
     });
+  }
+
+  render() {
+    // Счёт серии: имя + число побед для каждого игрока в комнате.
+    this.ui.q('[data-testid=series-score]').innerHTML = this.series
+      .map(
+        (p) => `<div class="ui-result-row" data-testid="series-row" data-player-id="${p.id}">
+            <span>${escapeHtml(p.name)}${p.id === net.selfId ? ' (вы)' : ''}</span>
+            <span>${p.seriesWins || 0}</span>
+          </div>`
+      )
+      .join('');
+
+    // Реванш: хост видит кнопку (активна при >= 2 игроков), гость — хинт.
+    const area = this.ui.q('[data-testid=rematch-area]');
+    const isHost = net.hostId === net.selfId;
+    if (isHost) {
+      const enough = net.players.length >= 2;
+      area.innerHTML = `<button class="ui-btn" data-testid="rematch-btn" ${
+        enough ? '' : 'disabled'
+      }>Ещё раз</button>`;
+      area.querySelector('[data-testid=rematch-btn]').addEventListener('click', () => startRace());
+    } else {
+      area.innerHTML = `<div class="ui-error" data-testid="rematch-hint">Ждём хоста…</div>`;
+    }
   }
 }
 

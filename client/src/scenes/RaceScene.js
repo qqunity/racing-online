@@ -76,7 +76,7 @@ export default class RaceScene extends Phaser.Scene {
       if (Number.isInteger(lane)) g.lane = lane;
       this.hud.setProgress(playerId, distance / this.finishDistance);
     };
-    this.onResults = ({ ranking }) => this.scene.start('Result', { ranking });
+    this.onResults = ({ ranking, series }) => this.scene.start('Result', { ranking, series });
     this.onPlayerLeft = ({ playerId }) => this.removeGhost(playerId);
     this.onAttacked = ({ targetId, attackerId, attackerName }) => {
       this.attackedCount += 1;
