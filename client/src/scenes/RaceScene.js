@@ -271,20 +271,23 @@ export default class RaceScene extends Phaser.Scene {
 
   interact(e) {
     if (e.kind === ENTITY.TRAFFIC) {
-      const crashed = this.effects.crash();
-      if (crashed) {
+      const result = this.effects.crash(); // 'crashed' | 'blocked' | false
+      if (result === 'crashed') {
         this.cameras.main.shake(180, 0.012);
-        e.collected = true;
-        if (e.sprite) {
-          e.sprite.destroy();
-          e.sprite = null;
-        }
+        this.consume(e);
+      } else if (result === 'blocked') {
+        // The shield ate the hit: the traffic car is gone, just a light bump.
+        this.cameras.main.shake(90, 0.006);
+        this.consume(e);
       }
     } else if (e.kind === ENTITY.NITRO) {
       this.effects.activateNitro();
       this.consume(e);
     } else if (e.kind === ENTITY.OIL) {
       this.effects.activateOil();
+      this.consume(e);
+    } else if (e.kind === ENTITY.SHIELD) {
+      this.effects.activateShield();
       this.consume(e);
     }
   }
@@ -306,6 +309,7 @@ export default class RaceScene extends Phaser.Scene {
       this.player.resetAngle();
     }
     this.player.setBlinking(this.effects.isInvulnerable && Math.floor(this.time.now / 100) % 2 === 0);
+    this.player.setShieldVisible(this.effects.hasShield);
   }
 
   // ---- input --------------------------------------------------------------
@@ -364,6 +368,28 @@ export default class RaceScene extends Phaser.Scene {
           lane: g.lane,
           visible: g.sprite.visible,
         }));
+      },
+      get effects() {
+        const fx = self.effects;
+        return {
+          hasShield: fx.hasShield,
+          attackCharges: fx.attackCharges,
+          oilMs: fx.oilMs,
+          crashMs: fx.crashMs,
+          invulnMs: fx.invulnMs,
+          label: fx.label(),
+        };
+      },
+      // Collect a specific track entity through the real interact() code-path.
+      forceCollect(entityId) {
+        const e = self.track.find((x) => x.id === entityId);
+        if (!e || e.collected) return false;
+        self.interact(e);
+        return true;
+      },
+      // Drive the traffic-collision branch without an actual sprite overlap.
+      simulateCrash() {
+        self.interact({ kind: ENTITY.TRAFFIC, collected: false, sprite: null });
       },
       // Teleport to the finish line for deterministic E2E tests.
       autoFinish() {
