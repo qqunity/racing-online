@@ -28,6 +28,14 @@ test('both players race the same seeded track layout', async ({ browser }) => {
   expect(a.fingerprint).toBe(b.fingerprint);
   expect(a.fingerprint.length).toBeGreaterThan(0);
 
+  // Every track is guaranteed to contain shield and attack power-ups
+  // (deterministic guaranteed spawn in shared/track.js).
+  const kinds = await host.page.evaluate(() => [
+    ...new Set(window.__GAME__.track.map((e) => e.kind)),
+  ]);
+  expect(kinds).toContain('shield');
+  expect(kinds).toContain('attack');
+
   await host.context.close();
   await guest.context.close();
 });

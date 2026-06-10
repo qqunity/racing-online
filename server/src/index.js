@@ -67,9 +67,14 @@ io.on('connection', (socket) => {
     races.start(room);
   });
 
-  socket.on('progress', ({ distance } = {}) => {
+  socket.on('progress', ({ distance, lane } = {}) => {
     const room = findRoom(socket.id);
-    if (room) races.updateProgress(room, socket.id, Number(distance) || 0);
+    if (room) races.updateProgress(room, socket.id, Number(distance) || 0, Number(lane) || 0);
+  });
+
+  socket.on('useAttack', ({ entityId } = {}) => {
+    const room = findRoom(socket.id);
+    if (room) races.useAttack(room, socket.id, Number(entityId));
   });
 
   socket.on('finished', ({ timeMs } = {}) => {

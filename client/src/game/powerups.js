@@ -19,6 +19,8 @@ export class EffectState {
     this.oilMs = 0;
     this.crashMs = 0;
     this.invulnMs = 0;
+    this.hasShield = false;
+    this.attackCharges = 0; // 0 | 1 — armed oil-bomb (see RaceScene / ATTACK)
   }
 
   activateNitro() {
@@ -32,12 +34,23 @@ export class EffectState {
     this.oilMs = OIL_DURATION_MS;
   }
 
+  // A shield absorbs one crash. Doesn't stack: picking a second one is a no-op.
+  activateShield() {
+    this.hasShield = true;
+  }
+
+  // Returns 'crashed' | 'blocked' (shield absorbed it) | false (invulnerable).
   crash() {
     if (this.invulnMs > 0) return false; // ignore during grace period
+    if (this.hasShield) {
+      this.hasShield = false;
+      this.invulnMs = INVULN_AFTER_CRASH_MS; // brief grace, no slowdown
+      return 'blocked';
+    }
     this.crashMs = CRASH_DURATION_MS;
     this.invulnMs = CRASH_DURATION_MS + INVULN_AFTER_CRASH_MS;
     this.nitroMs = 0;
-    return true;
+    return 'crashed';
   }
 
   // Advance all timers by dt (ms).
@@ -67,9 +80,12 @@ export class EffectState {
 
   // Short label for the HUD.
   label() {
-    if (this.crashMs > 0) return '💥 авария';
-    if (this.nitroMs > 0) return '⚡ нитро';
-    if (this.oilMs > 0) return '☣ занос';
-    return '';
+    let base = '';
+    if (this.crashMs > 0) base = '💥 авария';
+    else if (this.nitroMs > 0) base = '⚡ нитро';
+    else if (this.oilMs > 0) base = '☣ занос';
+    if (this.hasShield) base = base ? `${base} 🛡` : '🛡 щит';
+    if (this.attackCharges > 0) base = base ? `${base} · 🚀 Space` : '🚀 Space';
+    return base;
   }
 }

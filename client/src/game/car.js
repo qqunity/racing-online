@@ -14,6 +14,12 @@ export class PlayerCar {
       .setDisplaySize(CAR_W, CAR_H)
       .setDepth(5);
     this.laneTween = null;
+    // Shield indicator: translucent ring around the car while a shield is held.
+    this.shieldRing = scene.add
+      .circle(this.sprite.x, this.sprite.y, CAR_H * 0.62, 0x4aa8ff, 0.16)
+      .setStrokeStyle(3, 0x9fd0ff, 0.9)
+      .setDepth(6)
+      .setVisible(false);
   }
 
   get x() {
@@ -53,6 +59,15 @@ export class PlayerCar {
 
   setBlinking(on) {
     this.sprite.alpha = on ? 0.5 : 1;
+  }
+
+  // Toggle the shield ring; keeps it glued to the (tweened) car position.
+  setShieldVisible(on) {
+    this.shieldRing.setVisible(on);
+    if (on) {
+      this.shieldRing.x = this.sprite.x;
+      this.shieldRing.y = this.sprite.y;
+    }
   }
 
   resetAngle() {
