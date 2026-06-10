@@ -59,3 +59,11 @@ export function gameState(page) {
 export async function autoFinish(page) {
   await page.evaluate(() => window.__GAME__ && window.__GAME__.autoFinish());
 }
+
+// Finish the race for both players and wait until both see the results screen.
+export async function finishBoth(host, guest) {
+  await autoFinish(host.page);
+  await autoFinish(guest.page);
+  await expect(host.page.getByTestId('result-title')).toBeVisible();
+  await expect(guest.page.getByTestId('result-title')).toBeVisible();
+}

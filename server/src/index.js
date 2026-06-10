@@ -64,6 +64,7 @@ io.on('connection', (socket) => {
   socket.on('startRace', () => {
     const room = findRoom(socket.id);
     if (!room || room.hostId !== socket.id || room.race) return;
+    if (room.players.size < 2) return; // нужен хотя бы один соперник
     races.start(room);
   });
 

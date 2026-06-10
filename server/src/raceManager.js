@@ -78,7 +78,15 @@ export class RaceManager {
     room.race.done = true;
 
     const ranking = this.buildRanking(room);
-    this.io.to(room.code).emit('raceResults', { ranking });
+
+    // Серия реваншей: победителю (если он финишировал и ещё в комнате) +1.
+    const winner = ranking[0];
+    if (winner && winner.finished) {
+      const player = room.players.get(winner.id);
+      if (player) player.seriesWins += 1;
+    }
+
+    this.io.to(room.code).emit('raceResults', { ranking, series: room.playerList() });
     room.race = null; // back to lobby
   }
 

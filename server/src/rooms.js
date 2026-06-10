@@ -56,14 +56,15 @@ export class Room {
   constructor(code, hostId) {
     this.code = code;
     this.hostId = hostId;
-    /** @type {Map<string, {id:string, name:string}>} */
+    /** @type {Map<string, {id:string, name:string, seriesWins:number}>} */
     this.players = new Map();
     // Active race state, or null when in the lobby.
     this.race = null;
   }
 
   addPlayer(id, name) {
-    this.players.set(id, { id, name: name || 'Player' });
+    // seriesWins — счёт серии реваншей; живёт вместе с комнатой.
+    this.players.set(id, { id, name: name || 'Player', seriesWins: 0 });
   }
 
   removePlayer(id) {
@@ -85,6 +86,7 @@ export class Room {
       id: p.id,
       name: p.name,
       isHost: p.id === this.hostId,
+      seriesWins: p.seriesWins,
     }));
   }
 }

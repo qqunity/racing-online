@@ -63,7 +63,7 @@ export default class RaceScene extends Phaser.Scene {
       this.opponentDist.set(playerId, distance);
       this.hud.setProgress(playerId, distance / this.finishDistance);
     };
-    this.onResults = ({ ranking }) => this.scene.start('Result', { ranking });
+    this.onResults = ({ ranking, series }) => this.scene.start('Result', { ranking, series });
     socket.on('opponentProgress', this.onOpp);
     socket.on('raceResults', this.onResults);
 
