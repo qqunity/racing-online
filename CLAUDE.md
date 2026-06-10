@@ -11,7 +11,14 @@ Guidance for working in this repository.
 
 Браузерная 2D-мультиплеерная гонка на машинках. Игрок создаёт комнату или
 заходит по коду, шашкует стрелками **←/→** между потоком трафика, собирает
-нитро ⚡ и объезжает лужи масла ☣; побеждает тот, кто первым доедет до финиша.
+нитро ⚡, щит 🛡 (блокирует один краш) и атаку 🚀 (Space — масло-бомба в
+ближайшего соперника впереди), объезжает лужи масла ☣; побеждает тот, кто
+первым доедет до финиша. Соперники видны на трассе полупрозрачными
+«призраками». После гонки хост может запустить реванш — комната играет серию
+со счётом побед (`seriesWins`, живёт в памяти вместе с комнатой и теряется
+при переподключении). Из меню доступны «Рекорды» (персистентная статистика
+по `playerId` из localStorage) и «Трасса дня» — одиночный заезд по общему
+seed дня с таблицей лучших времён.
 
 ## Стек и архитектура
 
@@ -21,7 +28,9 @@ Guidance for working in this repository.
   `client/src/scenes/RaceScene.js`.
 - **Спрайты** — PNG-арт из CC0-набора Kenney.nl лежит в `client/public/sprites/`
   (Vite раздаёт `public/` с корня и копирует в `dist` при сборке). `BootScene`
-  грузит их в `preload()` под ключами `car-player/car-traffic/pu-nitro/pu-oil`.
+  грузит их в `preload()` под ключами `car-player/car-traffic/pu-nitro/pu-oil`;
+  текстуры `pu-shield/pu-attack` генерируются процедурно в `BootScene`
+  (Graphics → `generateTexture`) — подходящего CC0-арта в наборе нет.
   Реальный размер картинки не влияет на геймплей: отображаемый размер задаётся
   через `setDisplaySize()` константами `CAR_W/CAR_H/POWERUP_SIZE` из
   `shared/constants.js` (там же считаются коллизии). Заменить арт = положить
@@ -31,15 +40,24 @@ Guidance for working in this repository.
   цвет одинаков у всех игроков и **не трогает** генерацию трассы в `shared/`
   и `trackFingerprint`.
 - **Сервер** — Node.js + Express + Socket.IO (`server/`). `rooms.js` —
-  `RoomManager` (комнаты в памяти, коды, лобби, переназначение хоста).
-  `raceManager.js` — жизненный цикл гонки (seed, отсчёт, прогресс, ранжирование,
-  анти-чит на время финиша). `index.js` в проде раздаёт `client/dist` и
-  обслуживает WebSocket на **том же порту** (один origin, без CORS).
+  `RoomManager` (комнаты в памяти, коды, лобби, переназначение хоста;
+  `Room.mode = 'multi' | 'daily'`). `raceManager.js` — жизненный цикл гонки
+  (seed, отсчёт, прогресс, ранжирование, анти-чит на время финиша; серверная
+  копия трассы и валидация атак в `useAttack`; запись статистики в storage).
+  `storage.js` — персистентность: JSON-файл с атомарной записью (tmp+rename),
+  путь через env `DATA_FILE` (дефолт `data/stats.json`, в Docker — volume
+  `racing-data`, в тестах — `.tmp/test-stats.json`); хранит lifetime-статистику
+  по `playerId` и таблицы «трассы дня». `index.js` в проде раздаёт `client/dist`
+  и обслуживает WebSocket на **том же порту** (один origin, без CORS), плюс
+  REST: `GET /api/leaderboard`, `GET /api/daily` (в dev Vite проксирует `/api`).
 - **`shared/`** — код, общий для клиента и сервера. `rng.js` (`mulberry32`),
-  `track.js` (генерация трассы по seed), `constants.js`. **Фундамент честности:**
-  сервер выдаёт один seed на комнату, и обе стороны детерминированно строят
-  идентичную раскладку трафика/бонусов. Менять алгоритм генерации можно только
-  синхронно для клиента и сервера.
+  `track.js` (генерация трассы по seed; гарантирует минимум один щит и одну
+  атаку на трассу — детерминированно), `constants.js`, `daily.js` (seed
+  «трассы дня» от UTC-даты, FNV-1a). **Фундамент честности:** сервер выдаёт
+  один seed на комнату, и обе стороны детерминированно строят идентичную
+  раскладку трафика/бонусов. Менять алгоритм генерации можно только синхронно
+  для клиента и сервера. Атака — внешнее серверное событие и на генерацию
+  трассы не влияет.
 - **`tests/`** — Playwright E2E. Два browser context = два игрока в одной
   комнате. `tests/fixtures.js` — хелперы (создание/вход/старт/финиш).
 
@@ -49,10 +67,17 @@ Guidance for working in this repository.
   У `shared/package.json` обязан быть `"type": "module"` — иначе в Docker-образе
   (без корневого package.json) файлы загрузятся как CommonJS и упадут.
 - В `RaceScene` есть тест-хук `window.__GAME__` (`phase`, `distance`, `seed`,
-  `fingerprint`, `autoFinish()`). На него опираются E2E-тесты — не ломай контракт.
-- Socket.IO протокол: client→server `createRoom/joinRoom/startRace/progress/
-  finished/leaveRoom`; server→client `roomCreated/roomJoined/roomUpdate/
-  joinError/raceStarting/opponentProgress/raceResults/playerLeft`. При изменении
+  `fingerprint`, `mode`, `lane`, `ghosts`, `effects`, `autoFinish()`,
+  `forceCollect(entityId)`, `simulateCrash()`, `useAttack()`, `setDistance(d)`).
+  На него опираются E2E-тесты — контракт можно только расширять, не ломать.
+- Socket.IO протокол: client→server `createRoom/joinRoom/startDaily/startRace/
+  progress/useAttack/finished/leaveRoom` (createRoom/joinRoom/startDaily несут
+  `playerId`; progress — `{distance, lane}`); server→client `roomCreated/
+  roomJoined/roomUpdate/joinError/raceStarting/opponentProgress/attacked/
+  raceResults/playerLeft` (raceStarting несёт `mode`; opponentProgress —
+  `{playerId, distance, lane}`; raceResults — `{ranking, mode}` + `series` для
+  multi или `daily {dateKey, top}` для daily; players в roomUpdate несут
+  `seriesWins`). REST: `GET /api/leaderboard`, `GET /api/daily`. При изменении
   событий правь обе стороны и этот список.
 
 ## Тесты обязательны для каждой фичи
