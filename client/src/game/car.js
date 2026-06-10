@@ -3,13 +3,16 @@
 // scrolls); this class only owns lateral position and steering.
 
 import Phaser from 'phaser';
-import { LANES, LANE_CHANGE_MS, laneCenterX } from '@shared/constants.js';
+import { LANES, LANE_CHANGE_MS, laneCenterX, CAR_W, CAR_H } from '@shared/constants.js';
 
 export class PlayerCar {
   constructor(scene, lane, y) {
     this.scene = scene;
     this.lane = lane;
-    this.sprite = scene.add.image(laneCenterX(lane), y, 'car-player').setDepth(5);
+    this.sprite = scene.add
+      .image(laneCenterX(lane), y, 'car-player')
+      .setDisplaySize(CAR_W, CAR_H)
+      .setDepth(5);
     this.laneTween = null;
   }
 
