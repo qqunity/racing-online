@@ -46,6 +46,12 @@ export function startRace() {
   socket.emit('startRace');
 }
 
+// Daily challenge: solo room on today's fixed seed; server replies with
+// raceStarting directly (no roomCreated/lobby step).
+export function startDaily(name) {
+  socket.emit('startDaily', { name, playerId: getPlayerId() });
+}
+
 export function reportProgress(distance) {
   socket.emit('progress', { distance });
 }

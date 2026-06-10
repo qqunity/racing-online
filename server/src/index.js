@@ -13,6 +13,7 @@ import { RoomManager } from './rooms.js';
 import { RaceManager } from './raceManager.js';
 import { Storage } from './storage.js';
 import { PROGRESS_TICK_MS } from '../../shared/constants.js';
+import { dailyDateKey, dailySeed } from '../../shared/daily.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
@@ -38,6 +39,11 @@ app.get('/healthz', (_req, res) => res.json({ ok: true }));
 // REST: read-only leaderboards (must be registered before the static catch-all).
 app.get('/api/leaderboard', (_req, res) => {
   res.json({ top: storage.getLeaderboard(10) });
+});
+
+app.get('/api/daily', (_req, res) => {
+  const dateKey = dailyDateKey();
+  res.json({ dateKey, seed: dailySeed(dateKey), top: storage.getDaily(dateKey, 10) });
 });
 
 // Serve the built client when it exists (production / docker).
@@ -74,6 +80,21 @@ io.on('connection', (socket) => {
     socket.join(room.code);
     socket.emit('roomJoined', { code: room.code, players: room.playerList(), hostId: room.hostId });
     io.to(room.code).emit('roomUpdate', { players: room.playerList(), hostId: room.hostId });
+  });
+
+  // Daily challenge: a private single-player room racing today's fixed seed.
+  // No lobby — the race starts immediately, the client waits for raceStarting.
+  socket.on('startDaily', ({ name, playerId } = {}) => {
+    leaveCurrentRoom(socket);
+    socket.data.name = name || 'Player';
+    socket.data.playerId = sanitizePlayerId(playerId) ?? socket.data.playerId;
+
+    const room = rooms.createRoom(socket.id, socket.data.name, socket.data.playerId);
+    room.mode = 'daily';
+    socket.join(room.code);
+
+    const dateKey = dailyDateKey();
+    races.start(room, { seed: dailySeed(dateKey), mode: 'daily', dateKey });
   });
 
   socket.on('startRace', () => {

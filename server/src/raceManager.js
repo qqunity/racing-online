@@ -14,15 +14,21 @@ export class RaceManager {
     this.storage = storage; // optional persistence for stats/leaderboards
   }
 
-  // Start a race in a room. Picks a seed, schedules the countdown, and tells
-  // every client when (server clock) the race actually begins.
-  start(room) {
-    const seed = (Math.random() * 0xffffffff) >>> 0;
+  // Start a race in a room. Picks a seed (unless one is forced, e.g. the daily
+  // challenge), schedules the countdown, and tells every client when (server
+  // clock) the race actually begins.
+  start(room, opts = {}) {
+    const seed = opts.seed !== undefined ? opts.seed >>> 0 : (Math.random() * 0xffffffff) >>> 0;
+    const mode = opts.mode || room.mode || 'multi';
     const startAt = Date.now() + COUNTDOWN_MS;
 
     room.race = {
       seed,
       startAt,
+      mode,
+      // Fixed at start so a UTC-midnight rollover mid-race can't move the
+      // result onto the wrong day's board.
+      dateKey: opts.dateKey ?? null,
       finishDistance: FINISH_DISTANCE,
       // playerId -> { distance, finished, timeMs }
       progress: new Map(),
@@ -39,6 +45,7 @@ export class RaceManager {
       finishDistance: FINISH_DISTANCE,
       countdownMs: COUNTDOWN_MS,
       startAt,
+      mode,
     });
   }
 
@@ -79,23 +86,49 @@ export class RaceManager {
     room.race.done = true;
 
     const ranking = this.buildRanking(room);
+    const isDaily = room.race.mode === 'daily';
 
-    // Persist lifetime stats for multiplayer races with at least two
-    // participants (solo runs and daily challenges don't count here).
-    if (this.storage && ranking.length >= 2) {
-      for (const e of ranking) {
-        if (!e.playerId) continue; // unknown identity — nothing to attribute
-        this.storage.recordRaceResult({
-          playerId: e.playerId,
-          name: e.name,
-          won: e.place === 1 && e.finished,
-          finished: e.finished,
-          timeMs: e.timeMs,
-        });
+    if (isDaily) {
+      // Daily challenge: record finish times on the day's board only —
+      // lifetime races/wins are not affected by solo daily runs.
+      const dateKey = room.race.dateKey;
+      if (this.storage && dateKey) {
+        for (const e of ranking) {
+          if (e.finished && e.playerId) {
+            this.storage.recordDailyResult(dateKey, {
+              playerId: e.playerId,
+              name: e.name,
+              timeMs: e.timeMs,
+            });
+          }
+        }
       }
+      this.io.to(room.code).emit('raceResults', {
+        ranking,
+        mode: 'daily',
+        daily: {
+          dateKey,
+          top: this.storage ? this.storage.getDaily(dateKey, 10) : [],
+        },
+      });
+    } else {
+      // Persist lifetime stats for multiplayer races with at least two
+      // participants (solo runs don't count).
+      if (this.storage && ranking.length >= 2) {
+        for (const e of ranking) {
+          if (!e.playerId) continue; // unknown identity — nothing to attribute
+          this.storage.recordRaceResult({
+            playerId: e.playerId,
+            name: e.name,
+            won: e.place === 1 && e.finished,
+            finished: e.finished,
+            timeMs: e.timeMs,
+          });
+        }
+      }
+      this.io.to(room.code).emit('raceResults', { ranking, mode: 'multi' });
     }
 
-    this.io.to(room.code).emit('raceResults', { ranking });
     room.race = null; // back to lobby
   }
 

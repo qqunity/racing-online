@@ -33,6 +33,7 @@ export default class RaceScene extends Phaser.Scene {
     this.finishDistance = cfg.finishDistance;
     this.countdownMs = cfg.countdownMs;
     this.startAt = cfg.startAt; // server epoch ms
+    this.mode = cfg.mode || 'multi'; // 'multi' | 'daily'
 
     this.distance = 0;
     this.phase = 'countdown'; // countdown -> racing -> finished
@@ -63,7 +64,8 @@ export default class RaceScene extends Phaser.Scene {
       this.opponentDist.set(playerId, distance);
       this.hud.setProgress(playerId, distance / this.finishDistance);
     };
-    this.onResults = ({ ranking }) => this.scene.start('Result', { ranking });
+    this.onResults = ({ ranking, mode, daily }) =>
+      this.scene.start('Result', { ranking, mode: mode || this.mode, daily });
     socket.on('opponentProgress', this.onOpp);
     socket.on('raceResults', this.onResults);
 
@@ -281,6 +283,7 @@ export default class RaceScene extends Phaser.Scene {
     window.__GAME__ = {
       scene: 'Race',
       seed: this.seed,
+      mode: this.mode,
       finishDistance: this.finishDistance,
       track: this.track.map((e) => ({ id: e.id, dist: e.dist, lane: e.lane, kind: e.kind })),
       fingerprint: trackFingerprint(this.track),
