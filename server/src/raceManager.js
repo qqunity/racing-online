@@ -9,8 +9,9 @@ import {
 } from '../../shared/constants.js';
 
 export class RaceManager {
-  constructor(io) {
+  constructor(io, storage = null) {
     this.io = io;
+    this.storage = storage; // optional persistence for stats/leaderboards
   }
 
   // Start a race in a room. Picks a seed, schedules the countdown, and tells
@@ -78,6 +79,22 @@ export class RaceManager {
     room.race.done = true;
 
     const ranking = this.buildRanking(room);
+
+    // Persist lifetime stats for multiplayer races with at least two
+    // participants (solo runs and daily challenges don't count here).
+    if (this.storage && ranking.length >= 2) {
+      for (const e of ranking) {
+        if (!e.playerId) continue; // unknown identity — nothing to attribute
+        this.storage.recordRaceResult({
+          playerId: e.playerId,
+          name: e.name,
+          won: e.place === 1 && e.finished,
+          finished: e.finished,
+          timeMs: e.timeMs,
+        });
+      }
+    }
+
     this.io.to(room.code).emit('raceResults', { ranking });
     room.race = null; // back to lobby
   }
@@ -88,6 +105,7 @@ export class RaceManager {
       return {
         id,
         name: player ? player.name : 'Player',
+        playerId: player ? player.playerId : null,
         finished: p.finished,
         timeMs: p.timeMs,
         distance: p.distance,

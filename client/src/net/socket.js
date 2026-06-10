@@ -20,12 +20,26 @@ socket.on('connect', () => {
   net.selfId = socket.id;
 });
 
+// Stable identity for stats/leaderboards, persisted in localStorage so it
+// survives reconnects and page reloads (unlike socket.id).
+export function getPlayerId() {
+  let id = localStorage.getItem('racing.playerId');
+  if (!id) {
+    id =
+      typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `p-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+    localStorage.setItem('racing.playerId', id);
+  }
+  return id;
+}
+
 export function createRoom(name) {
-  socket.emit('createRoom', { name });
+  socket.emit('createRoom', { name, playerId: getPlayerId() });
 }
 
 export function joinRoom(code, name) {
-  socket.emit('joinRoom', { code: (code || '').toUpperCase(), name });
+  socket.emit('joinRoom', { code: (code || '').toUpperCase(), name, playerId: getPlayerId() });
 }
 
 export function startRace() {

@@ -24,6 +24,7 @@ export default class MenuScene extends Phaser.Scene {
         <input id="code" data-testid="code-input" maxlength="${ROOM_CODE_LENGTH}" placeholder="XXXX" style="text-transform:uppercase" />
         <button class="ui-btn secondary" data-testid="join-btn" style="width:auto;padding:12px 18px;">Войти</button>
       </div>
+      <button class="ui-btn secondary" data-testid="records-btn">🏆 Рекорды</button>
       <div class="ui-error" data-testid="menu-error"></div>
     `);
 
@@ -47,6 +48,7 @@ export default class MenuScene extends Phaser.Scene {
       remember();
       joinRoom(code, name());
     });
+    this.ui.q('[data-testid=records-btn]').addEventListener('click', () => this.showRecords());
 
     // Server responses.
     this.onCreated = ({ code, players }) => {
@@ -75,10 +77,55 @@ export default class MenuScene extends Phaser.Scene {
     this.scene.start('Lobby');
   }
 
+  // Sub-panel over the menu: the all-time leaderboard fetched from the server.
+  showRecords() {
+    this.closeSubPanel();
+    const panel = createOverlay(`
+      <h1>🏆 Рекорды</h1>
+      <h2>Лучшие гонщики за всё время</h2>
+      <div data-testid="leaderboard-list">Загрузка…</div>
+      <button class="ui-btn secondary" data-testid="records-back-btn">Назад</button>
+    `);
+    this.subPanel = panel;
+    panel.q('[data-testid=records-back-btn]').addEventListener('click', () => this.closeSubPanel());
+
+    fetch('/api/leaderboard')
+      .then((r) => r.json())
+      .then(({ top }) => {
+        const list = panel.q('[data-testid=leaderboard-list]');
+        if (!list) return; // panel already closed
+        if (!top || top.length === 0) {
+          list.innerHTML = '<div data-testid="leaderboard-empty">Пока никто не финишировал — будь первым!</div>';
+          return;
+        }
+        list.innerHTML = top
+          .map((p, i) => {
+            const best = p.bestTimeMs != null ? `${(p.bestTimeMs / 1000).toFixed(2)} с` : '—';
+            return `<div class="ui-result-row" data-testid="leaderboard-row">
+                <span><span class="ui-place">${i + 1}.</span>${escapeHtml(p.name)}</span>
+                <span>🏆 ${p.wins} · 🏁 ${p.races} · ${best}</span>
+              </div>`;
+          })
+          .join('');
+      })
+      .catch(() => {
+        const list = panel.q('[data-testid=leaderboard-list]');
+        if (list) list.textContent = 'Не удалось загрузить рекорды';
+      });
+  }
+
+  closeSubPanel() {
+    if (this.subPanel) {
+      this.subPanel.destroy();
+      this.subPanel = null;
+    }
+  }
+
   cleanup() {
     socket.off('roomCreated', this.onCreated);
     socket.off('roomJoined', this.onJoined);
     socket.off('joinError', this.onJoinError);
+    this.closeSubPanel();
     if (this.ui) this.ui.destroy();
   }
 
@@ -90,4 +137,8 @@ export default class MenuScene extends Phaser.Scene {
       this.add.rectangle(width / 2, y, 8, 50, 0x4a5060).setOrigin(0.5);
     }
   }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }

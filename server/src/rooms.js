@@ -23,10 +23,10 @@ export class RoomManager {
     return code;
   }
 
-  createRoom(hostId, hostName) {
+  createRoom(hostId, hostName, hostPlayerId = null) {
     const code = this.generateCode();
     const room = new Room(code, hostId);
-    room.addPlayer(hostId, hostName);
+    room.addPlayer(hostId, hostName, hostPlayerId);
     this.rooms.set(code, room);
     return room;
   }
@@ -56,14 +56,17 @@ export class Room {
   constructor(code, hostId) {
     this.code = code;
     this.hostId = hostId;
-    /** @type {Map<string, {id:string, name:string}>} */
+    /** @type {Map<string, {id:string, name:string, playerId:string|null}>} */
     this.players = new Map();
     // Active race state, or null when in the lobby.
     this.race = null;
+    // 'multi' — обычная комната с лобби; 'daily' — одиночный заезд «трассы дня».
+    this.mode = 'multi';
   }
 
-  addPlayer(id, name) {
-    this.players.set(id, { id, name: name || 'Player' });
+  // playerId — stable persistent identity (localStorage UUID), used for stats.
+  addPlayer(id, name, playerId = null) {
+    this.players.set(id, { id, name: name || 'Player', playerId: playerId || null });
   }
 
   removePlayer(id) {
