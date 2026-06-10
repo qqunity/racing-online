@@ -72,6 +72,11 @@ io.on('connection', (socket) => {
     if (room) races.updateProgress(room, socket.id, Number(distance) || 0, Number(lane) || 0);
   });
 
+  socket.on('useAttack', ({ entityId } = {}) => {
+    const room = findRoom(socket.id);
+    if (room) races.useAttack(room, socket.id, Number(entityId));
+  });
+
   socket.on('finished', ({ timeMs } = {}) => {
     const room = findRoom(socket.id);
     if (room) races.finish(room, socket.id, Number(timeMs));

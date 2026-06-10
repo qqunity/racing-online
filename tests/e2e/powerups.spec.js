@@ -62,3 +62,78 @@ test('shield blocks exactly one crash, then crashes hurt again', async ({ browse
   await host.context.close();
   await guest.context.close();
 });
+
+test('attack pickup oils the nearest opponent ahead, exactly once', async ({ browser }) => {
+  const { host, guest } = await startTwoPlayerRace(browser);
+
+  // Earliest attack pickup on the (shared, deterministic) track.
+  const attack = await guest.page.evaluate(() => {
+    const list = window.__GAME__.track.filter((e) => e.kind === 'attack');
+    list.sort((a, b) => a.dist - b.dist);
+    return list[0] || null;
+  });
+  expect(attack).not.toBeNull();
+
+  // The guest collects the pickup through the real interact() path: armed.
+  const armed = await guest.page.evaluate((id) => {
+    const g = window.__GAME__;
+    g.forceCollect(id);
+    return { ...g.effects };
+  }, attack.id);
+  expect(armed.attackCharges).toBe(1);
+  expect(armed.label).toContain('🚀');
+
+  // Deterministic positions regardless of where this seed put the pickup:
+  // the victim (host) sits 250m ahead of the attacker (guest), and the guest
+  // has plausibly reached the pickup (server checks distance >= dist - 250).
+  await host.page.evaluate((d) => window.__GAME__.setDistance(d), attack.dist + 150);
+  await guest.page.evaluate((d) => window.__GAME__.setDistance(d), attack.dist - 100);
+
+  // Let a few progress ticks (100ms) reach the server, and make sure the host
+  // isn't on nitro (nitro shrugs off oil and would mask the hit).
+  await host.page.waitForFunction(() => window.__GAME__ && window.__GAME__.effects.nitroMs === 0);
+  await guest.page.waitForTimeout(400);
+
+  // Fire via the real SPACE code-path.
+  await guest.page.evaluate(() => window.__GAME__.useAttack());
+
+  // The host (ahead of the attacker) gets hit: oil spin-out + attacker's name.
+  await host.page.waitForFunction(
+    () => {
+      const g = window.__GAME__;
+      return (
+        g &&
+        g.attackedCount === 1 &&
+        g.lastAttack &&
+        g.lastAttack.wasSelf &&
+        g.effects.oilMs > 0
+      );
+    },
+    null,
+    { timeout: 5_000 }
+  );
+  const hit = await host.page.evaluate(() => window.__GAME__.lastAttack);
+  expect(hit.attackerName).toBe('Гость');
+
+  // The charge is spent client-side, and a replay of the same entity (raw
+  // network send, bypassing the client guard) is rejected by the server.
+  const after = await guest.page.evaluate((id) => {
+    const g = window.__GAME__;
+    g.useAttack(); // no charge left — must be a client-side no-op
+    g._rawUseAttack(id); // forged replay — server must reject (one-shot/cooldown)
+    return { ...g.effects };
+  }, attack.id);
+  expect(after.attackCharges).toBe(0);
+
+  await host.page.waitForTimeout(800);
+  const counts = await Promise.all([
+    host.page.evaluate(() => (window.__GAME__ ? window.__GAME__.attackedCount : null)),
+    guest.page.evaluate(() => (window.__GAME__ ? window.__GAME__.attackedCount : null)),
+  ]);
+  for (const c of counts) {
+    if (c !== null) expect(c).toBe(1); // no second 'attacked' anywhere
+  }
+
+  await host.context.close();
+  await guest.context.close();
+});

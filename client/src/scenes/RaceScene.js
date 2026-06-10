@@ -13,7 +13,13 @@ import {
   POWERUP_SIZE,
 } from '@shared/constants.js';
 import { generateTrack, trackFingerprint } from '@shared/track.js';
-import { socket, net, reportProgress, reportFinished } from '../net/socket.js';
+import {
+  socket,
+  net,
+  reportProgress,
+  reportFinished,
+  useAttack as sendAttack,
+} from '../net/socket.js';
 import { PlayerCar } from '../game/car.js';
 import { EffectState } from '../game/powerups.js';
 import { Hud } from '../ui/hud.js';
@@ -43,6 +49,10 @@ export default class RaceScene extends Phaser.Scene {
     this.scrollPx = 0;
     // playerId -> { sprite, nameText, shownDist, targetDist, lane, name }
     this.ghosts = new Map();
+    // Attack pickup state: which entity armed the (single) charge.
+    this.attackEntityId = null;
+    this.attackedCount = 0; // 'attacked' events seen (any target) — test hook
+    this.lastAttack = null; // { targetId, attackerId, attackerName }
   }
 
   create() {
@@ -68,9 +78,22 @@ export default class RaceScene extends Phaser.Scene {
     };
     this.onResults = ({ ranking }) => this.scene.start('Result', { ranking });
     this.onPlayerLeft = ({ playerId }) => this.removeGhost(playerId);
+    this.onAttacked = ({ targetId, attackerId, attackerName }) => {
+      this.attackedCount += 1;
+      this.lastAttack = { targetId, attackerId, attackerName };
+      if (targetId === net.selfId) {
+        this.effects.activateOil();
+        this.showToast(`🛢 Атака от ${attackerName}!`, '#ff6b6b');
+      } else if (attackerId === net.selfId) {
+        this.showToast('🚀 Бомба пошла!', '#ffb347');
+      } else {
+        this.showToast(`🚀 ${attackerName} атакует!`, '#9aa3b2');
+      }
+    };
     socket.on('opponentProgress', this.onOpp);
     socket.on('raceResults', this.onResults);
     socket.on('playerLeft', this.onPlayerLeft);
+    socket.on('attacked', this.onAttacked);
 
     this.exposeTestHooks();
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.cleanup());
@@ -289,6 +312,10 @@ export default class RaceScene extends Phaser.Scene {
     } else if (e.kind === ENTITY.SHIELD) {
       this.effects.activateShield();
       this.consume(e);
+    } else if (e.kind === ENTITY.ATTACK) {
+      this.effects.attackCharges = 1;
+      this.attackEntityId = e.id;
+      this.consume(e);
     }
   }
 
@@ -321,6 +348,40 @@ export default class RaceScene extends Phaser.Scene {
     this.input.keyboard.on('keydown-RIGHT', right);
     this.input.keyboard.on('keydown-A', left);
     this.input.keyboard.on('keydown-D', right);
+    this.input.keyboard.on('keydown-SPACE', () => this.fireAttack());
+  }
+
+  // Spend the armed attack charge: the server validates and picks the target.
+  fireAttack() {
+    if (this.phase !== 'racing') return;
+    if (this.effects.attackCharges <= 0 || this.attackEntityId === null) return;
+    this.effects.attackCharges = 0;
+    const entityId = this.attackEntityId;
+    this.attackEntityId = null;
+    sendAttack(entityId);
+  }
+
+  // Short transient message floating above the player car.
+  showToast(text, color = '#ffffff') {
+    const toast = this.add
+      .text(VIEW_WIDTH / 2, PLAYER_Y - CAR_H * 1.4, text, {
+        fontFamily: 'sans-serif',
+        fontSize: '22px',
+        color,
+        fontStyle: 'bold',
+        stroke: '#10131a',
+        strokeThickness: 4,
+      })
+      .setOrigin(0.5)
+      .setDepth(25);
+    this.tweens.add({
+      targets: toast,
+      y: toast.y - 50,
+      alpha: 0,
+      duration: 1600,
+      ease: 'Quad.easeOut',
+      onComplete: () => toast.destroy(),
+    });
   }
 
   // ---- finish -------------------------------------------------------------
@@ -377,8 +438,17 @@ export default class RaceScene extends Phaser.Scene {
           oilMs: fx.oilMs,
           crashMs: fx.crashMs,
           invulnMs: fx.invulnMs,
+          nitroMs: fx.nitroMs,
           label: fx.label(),
         };
+      },
+      get attackedCount() {
+        return self.attackedCount;
+      },
+      get lastAttack() {
+        return self.lastAttack
+          ? { ...self.lastAttack, wasSelf: self.lastAttack.targetId === net.selfId }
+          : null;
       },
       // Collect a specific track entity through the real interact() code-path.
       forceCollect(entityId) {
@@ -390,6 +460,20 @@ export default class RaceScene extends Phaser.Scene {
       // Drive the traffic-collision branch without an actual sprite overlap.
       simulateCrash() {
         self.interact({ kind: ENTITY.TRAFFIC, collected: false, sprite: null });
+      },
+      // Press the attack button through the real code-path (SPACE handler).
+      useAttack() {
+        self.fireAttack();
+      },
+      // Raw network send, bypassing the client-side charge bookkeeping —
+      // lets tests poke the server-side validation (replay, cooldown).
+      _rawUseAttack(entityId) {
+        sendAttack(entityId);
+      },
+      // Teleport forward (monotonic) — keeps E2E independent of where the
+      // guaranteed pickups landed on this seed's track.
+      setDistance(d) {
+        if (Number.isFinite(d)) self.distance = Math.max(self.distance, d);
       },
       // Teleport to the finish line for deterministic E2E tests.
       autoFinish() {
@@ -403,6 +487,7 @@ export default class RaceScene extends Phaser.Scene {
     socket.off('opponentProgress', this.onOpp);
     socket.off('raceResults', this.onResults);
     socket.off('playerLeft', this.onPlayerLeft);
+    socket.off('attacked', this.onAttacked);
     if (window.__GAME__ && window.__GAME__.scene === 'Race') {
       delete window.__GAME__;
     }
