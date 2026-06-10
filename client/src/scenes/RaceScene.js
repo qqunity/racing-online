@@ -41,7 +41,8 @@ export default class RaceScene extends Phaser.Scene {
     this.finished = false;
     this._autoFinish = false;
     this.scrollPx = 0;
-    this.opponentDist = new Map();
+    // playerId -> { sprite, nameText, shownDist, targetDist, lane, name }
+    this.ghosts = new Map();
   }
 
   create() {
@@ -57,15 +58,19 @@ export default class RaceScene extends Phaser.Scene {
     this.setupInput();
     this.buildCountdownText();
 
-    // Network: opponents' progress + final results.
-    this.onOpp = ({ playerId, distance }) => {
+    // Network: opponents' progress (HUD + on-track ghosts) + final results.
+    this.onOpp = ({ playerId, distance, lane }) => {
       if (playerId === net.selfId) return;
-      this.opponentDist.set(playerId, distance);
+      const g = this.ensureGhost(playerId);
+      g.targetDist = distance;
+      if (Number.isInteger(lane)) g.lane = lane;
       this.hud.setProgress(playerId, distance / this.finishDistance);
     };
     this.onResults = ({ ranking }) => this.scene.start('Result', { ranking });
+    this.onPlayerLeft = ({ playerId }) => this.removeGhost(playerId);
     socket.on('opponentProgress', this.onOpp);
     socket.on('raceResults', this.onResults);
+    socket.on('playerLeft', this.onPlayerLeft);
 
     this.exposeTestHooks();
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.cleanup());
@@ -91,6 +96,7 @@ export default class RaceScene extends Phaser.Scene {
 
     this.scrollRoad(delta);
     this.layoutEntities();
+    this.updateGhosts(delta);
     this.handleCollisions();
     this.applyEffectVisuals(delta);
 
@@ -103,7 +109,7 @@ export default class RaceScene extends Phaser.Scene {
     this.sinceProgress += delta;
     if (this.sinceProgress >= PROGRESS_TICK_MS) {
       this.sinceProgress = 0;
-      reportProgress(Math.round(this.distance));
+      reportProgress(Math.round(this.distance), this.player.lane);
     }
 
     if (this.distance >= this.finishDistance && !this.finished) {
@@ -192,6 +198,63 @@ export default class RaceScene extends Phaser.Scene {
           e.collected = true;
         }
       }
+    }
+  }
+
+  // ---- opponent ghosts ------------------------------------------------------
+  // Translucent cars showing where the opponents are on the track. Purely
+  // visual: ghosts never collide (handleCollisions walks this.track only).
+
+  ensureGhost(playerId) {
+    let g = this.ghosts.get(playerId);
+    if (g) return g;
+    const player = net.players.find((p) => p.id === playerId);
+    const name = player ? player.name : 'Player';
+    const startLane = Math.floor(LANES / 2);
+    const sprite = this.add
+      .image(laneCenterX(startLane), VIEW_HEIGHT + 200, 'car-player')
+      .setDisplaySize(CAR_W, CAR_H)
+      .setAlpha(0.35)
+      .setTint(ghostTint(playerId))
+      .setDepth(3) // below traffic (4) and the player (5)
+      .setVisible(false);
+    const nameText = this.add
+      .text(sprite.x, sprite.y, name, {
+        fontFamily: 'sans-serif',
+        fontSize: '12px',
+        color: '#dfe3ea',
+      })
+      .setOrigin(0.5, 1)
+      .setAlpha(0.8)
+      .setDepth(3)
+      .setVisible(false);
+    g = { sprite, nameText, shownDist: 0, targetDist: 0, lane: startLane, name };
+    this.ghosts.set(playerId, g);
+    return g;
+  }
+
+  removeGhost(playerId) {
+    const g = this.ghosts.get(playerId);
+    if (!g) return;
+    g.sprite.destroy();
+    g.nameText.destroy();
+    this.ghosts.delete(playerId);
+  }
+
+  updateGhosts(delta) {
+    const k = Math.min(1, delta / 150);
+    for (const g of this.ghosts.values()) {
+      // Smooth out the ~100ms network ticks.
+      g.shownDist += (g.targetDist - g.shownDist) * k;
+      const screenY = PLAYER_Y - (g.shownDist - this.distance) * PX_PER_METRE;
+      const visible = screenY > -60 && screenY < VIEW_HEIGHT + 60;
+      g.sprite.setVisible(visible);
+      g.nameText.setVisible(visible);
+      if (!visible) continue;
+      g.sprite.x += (laneCenterX(g.lane) - g.sprite.x) * k;
+      g.sprite.y = screenY;
+      g.nameText.x = g.sprite.x;
+      g.nameText.y = screenY - CAR_H / 2 - 6;
     }
   }
 
@@ -290,6 +353,18 @@ export default class RaceScene extends Phaser.Scene {
       get distance() {
         return self.distance;
       },
+      get lane() {
+        return self.player.lane;
+      },
+      get ghosts() {
+        return [...self.ghosts.entries()].map(([id, g]) => ({
+          id,
+          name: g.name,
+          distance: g.shownDist,
+          lane: g.lane,
+          visible: g.sprite.visible,
+        }));
+      },
       // Teleport to the finish line for deterministic E2E tests.
       autoFinish() {
         self.phase = 'racing';
@@ -301,6 +376,7 @@ export default class RaceScene extends Phaser.Scene {
   cleanup() {
     socket.off('opponentProgress', this.onOpp);
     socket.off('raceResults', this.onResults);
+    socket.off('playerLeft', this.onPlayerLeft);
     if (window.__GAME__ && window.__GAME__.scene === 'Race') {
       delete window.__GAME__;
     }
@@ -311,6 +387,17 @@ export default class RaceScene extends Phaser.Scene {
 // shared) entity id, so every client paints the same car the same colour
 // without touching shared track generation or the fairness fingerprint.
 const TRAFFIC_TEXTURES = ['car-traffic', 'car-traffic-blue', 'car-traffic-yellow', 'car-traffic-grey'];
+
+// Ghost tints: a stable colour per opponent, hashed from the (string) playerId
+// — same idea as textureFor's id hash, adapted for socket ids.
+const GHOST_TINTS = [0xff6b6b, 0x4aa8ff, 0xf0d050, 0x9b6bff, 0x36d17a, 0xff9f43];
+
+function ghostTint(playerId) {
+  let h = 0;
+  const s = String(playerId);
+  for (let i = 0; i < s.length; i++) h = (Math.imul(h, 31) + s.charCodeAt(i)) >>> 0;
+  return GHOST_TINTS[((h * 2654435761) >>> 0) % GHOST_TINTS.length];
+}
 
 function textureFor(e) {
   if (e.kind === ENTITY.NITRO) return 'pu-nitro';

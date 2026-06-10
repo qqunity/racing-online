@@ -59,3 +59,13 @@ export function gameState(page) {
 export async function autoFinish(page) {
   await page.evaluate(() => window.__GAME__ && window.__GAME__.autoFinish());
 }
+
+// Opponent ghosts as seen by this client: [{ id, name, distance, lane, visible }].
+export function ghosts(page) {
+  return page.evaluate(() => (window.__GAME__ ? window.__GAME__.ghosts : null));
+}
+
+// The local player's current lane index.
+export function playerLane(page) {
+  return page.evaluate(() => (window.__GAME__ ? window.__GAME__.lane : null));
+}

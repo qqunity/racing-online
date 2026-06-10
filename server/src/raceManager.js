@@ -6,6 +6,7 @@ import {
   COUNTDOWN_MS,
   FINISH_DISTANCE,
   MIN_PLAUSIBLE_FINISH_MS,
+  LANES,
 } from '../../shared/constants.js';
 
 export class RaceManager {
@@ -41,13 +42,18 @@ export class RaceManager {
     });
   }
 
-  // A client reports its current distance. Broadcast to opponents for the HUD.
-  updateProgress(room, socketId, distance) {
+  // A client reports its current distance + lane. Broadcast to opponents for
+  // the HUD progress rail and the on-track ghost cars.
+  updateProgress(room, socketId, distance, lane) {
     if (!room.race || room.race.done) return;
     const p = room.race.progress.get(socketId);
     if (!p || p.finished) return;
     p.distance = Math.max(p.distance, distance); // monotonic
-    socketIoBroadcastProgress(this.io, room, socketId, p.distance);
+    const safeLane = Number.isFinite(lane)
+      ? Math.min(LANES - 1, Math.max(0, Math.round(lane)))
+      : 0;
+    p.lane = safeLane;
+    socketIoBroadcastProgress(this.io, room, socketId, p.distance, safeLane);
   }
 
   // A client reports it crossed the finish line.
@@ -106,7 +112,7 @@ export class RaceManager {
   }
 }
 
-function socketIoBroadcastProgress(io, room, socketId, distance) {
+function socketIoBroadcastProgress(io, room, socketId, distance, lane) {
   // Send to everyone in the room except the reporter.
-  io.to(room.code).emit('opponentProgress', { playerId: socketId, distance });
+  io.to(room.code).emit('opponentProgress', { playerId: socketId, distance, lane });
 }

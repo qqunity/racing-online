@@ -32,8 +32,8 @@ export function startRace() {
   socket.emit('startRace');
 }
 
-export function reportProgress(distance) {
-  socket.emit('progress', { distance });
+export function reportProgress(distance, lane) {
+  socket.emit('progress', { distance, lane });
 }
 
 export function reportFinished(timeMs) {
