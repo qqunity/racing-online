@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { createOverlay } from '../ui/dom.js';
-import { socket, net, createRoom, joinRoom } from '../net/socket.js';
+import { socket, net, createRoom, joinRoom, startDaily } from '../net/socket.js';
 import { ROOM_CODE_LENGTH } from '@shared/constants.js';
 
 // Title screen: enter a name, then create a new room or join one by code.
@@ -24,6 +24,8 @@ export default class MenuScene extends Phaser.Scene {
         <input id="code" data-testid="code-input" maxlength="${ROOM_CODE_LENGTH}" placeholder="XXXX" style="text-transform:uppercase" />
         <button class="ui-btn secondary" data-testid="join-btn" style="width:auto;padding:12px 18px;">Войти</button>
       </div>
+      <button class="ui-btn secondary" data-testid="daily-btn">📅 Трасса дня</button>
+      <button class="ui-btn secondary" data-testid="records-btn">🏆 Рекорды</button>
       <div class="ui-error" data-testid="menu-error"></div>
     `);
 
@@ -47,6 +49,18 @@ export default class MenuScene extends Phaser.Scene {
       remember();
       joinRoom(code, name());
     });
+    this.ui.q('[data-testid=records-btn]').addEventListener('click', () => this.showRecords());
+    this.ui.q('[data-testid=daily-btn]').addEventListener('click', () => {
+      remember();
+      this.showDaily(name);
+    });
+
+    // Daily race begins straight from the menu (no lobby step).
+    this.onRaceStarting = (cfg) => {
+      net.lastRaceConfig = cfg;
+      this.scene.start('Race', cfg);
+    };
+    socket.on('raceStarting', this.onRaceStarting);
 
     // Server responses.
     this.onCreated = ({ code, players }) => {
@@ -75,10 +89,100 @@ export default class MenuScene extends Phaser.Scene {
     this.scene.start('Lobby');
   }
 
+  // Sub-panel over the menu: the all-time leaderboard fetched from the server.
+  showRecords() {
+    this.closeSubPanel();
+    const panel = createOverlay(`
+      <h1>🏆 Рекорды</h1>
+      <h2>Лучшие гонщики за всё время</h2>
+      <div data-testid="leaderboard-list">Загрузка…</div>
+      <button class="ui-btn secondary" data-testid="records-back-btn">Назад</button>
+    `);
+    this.subPanel = panel;
+    panel.q('[data-testid=records-back-btn]').addEventListener('click', () => this.closeSubPanel());
+
+    fetch('/api/leaderboard')
+      .then((r) => r.json())
+      .then(({ top }) => {
+        const list = panel.q('[data-testid=leaderboard-list]');
+        if (!list) return; // panel already closed
+        if (!top || top.length === 0) {
+          list.innerHTML = '<div data-testid="leaderboard-empty">Пока никто не финишировал — будь первым!</div>';
+          return;
+        }
+        list.innerHTML = top
+          .map((p, i) => {
+            const best = p.bestTimeMs != null ? `${(p.bestTimeMs / 1000).toFixed(2)} с` : '—';
+            return `<div class="ui-result-row" data-testid="leaderboard-row">
+                <span><span class="ui-place">${i + 1}.</span>${escapeHtml(p.name)}</span>
+                <span>🏆 ${p.wins} · 🏁 ${p.races} · ${best}</span>
+              </div>`;
+          })
+          .join('');
+      })
+      .catch(() => {
+        const list = panel.q('[data-testid=leaderboard-list]');
+        if (list) list.textContent = 'Не удалось загрузить рекорды';
+      });
+  }
+
+  // Sub-panel: today's challenge — same track for everyone, top-10 of the day.
+  showDaily(getName) {
+    this.closeSubPanel();
+    const panel = createOverlay(`
+      <h1>📅 Трасса дня</h1>
+      <h2 data-testid="daily-date">Сегодня</h2>
+      <div data-testid="daily-list">Загрузка…</div>
+      <button class="ui-btn" data-testid="daily-start-btn">Поехали!</button>
+      <button class="ui-btn secondary" data-testid="daily-back-btn">Назад</button>
+    `);
+    this.subPanel = panel;
+    panel.q('[data-testid=daily-back-btn]').addEventListener('click', () => this.closeSubPanel());
+    panel.q('[data-testid=daily-start-btn]').addEventListener('click', () => {
+      // Solo race: RaceScene builds its HUD from net.players.
+      net.players = [{ id: net.selfId, name: getName() }];
+      startDaily(getName());
+    });
+
+    fetch('/api/daily')
+      .then((r) => r.json())
+      .then(({ dateKey, top }) => {
+        const dateEl = panel.q('[data-testid=daily-date]');
+        if (!dateEl) return; // panel already closed
+        dateEl.textContent = `Заезд дня · ${dateKey} (UTC)`;
+        const list = panel.q('[data-testid=daily-list]');
+        if (!top || top.length === 0) {
+          list.innerHTML = '<div data-testid="daily-empty">Сегодня ещё никто не финишировал</div>';
+          return;
+        }
+        list.innerHTML = top
+          .map(
+            (e, i) => `<div class="ui-result-row" data-testid="daily-row">
+                <span><span class="ui-place">${i + 1}.</span>${escapeHtml(e.name)}</span>
+                <span>${(e.timeMs / 1000).toFixed(2)} с</span>
+              </div>`,
+          )
+          .join('');
+      })
+      .catch(() => {
+        const list = panel.q('[data-testid=daily-list]');
+        if (list) list.textContent = 'Не удалось загрузить топ дня';
+      });
+  }
+
+  closeSubPanel() {
+    if (this.subPanel) {
+      this.subPanel.destroy();
+      this.subPanel = null;
+    }
+  }
+
   cleanup() {
     socket.off('roomCreated', this.onCreated);
     socket.off('roomJoined', this.onJoined);
     socket.off('joinError', this.onJoinError);
+    socket.off('raceStarting', this.onRaceStarting);
+    this.closeSubPanel();
     if (this.ui) this.ui.destroy();
   }
 
@@ -90,4 +194,8 @@ export default class MenuScene extends Phaser.Scene {
       this.add.rectangle(width / 2, y, 8, 50, 0x4a5060).setOrigin(0.5);
     }
   }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }

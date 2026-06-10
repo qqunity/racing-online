@@ -11,11 +11,17 @@ import { Server } from 'socket.io';
 
 import { RoomManager } from './rooms.js';
 import { RaceManager } from './raceManager.js';
+import { Storage } from './storage.js';
 import { PROGRESS_TICK_MS } from '../../shared/constants.js';
+import { dailyDateKey, dailySeed } from '../../shared/daily.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
 const CLIENT_DIST = path.resolve(__dirname, '../../client/dist');
+// Stats live in a JSON file; override the path via DATA_FILE (tests do).
+const DATA_FILE = path.resolve(
+  process.env.DATA_FILE || path.resolve(__dirname, '../../data/stats.json'),
+);
 
 const app = express();
 const server = http.createServer(app);
@@ -25,9 +31,20 @@ const io = new Server(server, {
 });
 
 const rooms = new RoomManager();
-const races = new RaceManager(io);
+const storage = new Storage(DATA_FILE);
+const races = new RaceManager(io, storage);
 
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
+
+// REST: read-only leaderboards (must be registered before the static catch-all).
+app.get('/api/leaderboard', (_req, res) => {
+  res.json({ top: storage.getLeaderboard(10) });
+});
+
+app.get('/api/daily', (_req, res) => {
+  const dateKey = dailyDateKey();
+  res.json({ dateKey, seed: dailySeed(dateKey), top: storage.getDaily(dateKey, 10) });
+});
 
 // Serve the built client when it exists (production / docker).
 if (fs.existsSync(CLIENT_DIST)) {
@@ -37,28 +54,47 @@ if (fs.existsSync(CLIENT_DIST)) {
 
 io.on('connection', (socket) => {
   socket.data.name = 'Player';
+  socket.data.playerId = null;
 
-  socket.on('createRoom', ({ name } = {}) => {
+  socket.on('createRoom', ({ name, playerId } = {}) => {
     leaveCurrentRoom(socket); // safety: one room at a time
     socket.data.name = name || 'Player';
-    const room = rooms.createRoom(socket.id, socket.data.name);
+    socket.data.playerId = sanitizePlayerId(playerId) ?? socket.data.playerId;
+    const room = rooms.createRoom(socket.id, socket.data.name, socket.data.playerId);
     socket.join(room.code);
     socket.emit('roomCreated', { code: room.code, players: room.playerList() });
     io.to(room.code).emit('roomUpdate', { players: room.playerList(), hostId: room.hostId });
   });
 
-  socket.on('joinRoom', ({ code, name } = {}) => {
+  socket.on('joinRoom', ({ code, name, playerId } = {}) => {
     const room = rooms.getRoom(code);
     if (!room) return socket.emit('joinError', { msg: 'Комната не найдена' });
+    if (room.mode === 'daily') return socket.emit('joinError', { msg: 'Комната не найдена' });
     if (room.race) return socket.emit('joinError', { msg: 'Гонка уже идёт' });
     if (room.isFull()) return socket.emit('joinError', { msg: 'Комната заполнена' });
 
     leaveCurrentRoom(socket);
     socket.data.name = name || 'Player';
-    room.addPlayer(socket.id, socket.data.name);
+    socket.data.playerId = sanitizePlayerId(playerId) ?? socket.data.playerId;
+    room.addPlayer(socket.id, socket.data.name, socket.data.playerId);
     socket.join(room.code);
     socket.emit('roomJoined', { code: room.code, players: room.playerList(), hostId: room.hostId });
     io.to(room.code).emit('roomUpdate', { players: room.playerList(), hostId: room.hostId });
+  });
+
+  // Daily challenge: a private single-player room racing today's fixed seed.
+  // No lobby — the race starts immediately, the client waits for raceStarting.
+  socket.on('startDaily', ({ name, playerId } = {}) => {
+    leaveCurrentRoom(socket);
+    socket.data.name = name || 'Player';
+    socket.data.playerId = sanitizePlayerId(playerId) ?? socket.data.playerId;
+
+    const room = rooms.createRoom(socket.id, socket.data.name, socket.data.playerId);
+    room.mode = 'daily';
+    socket.join(room.code);
+
+    const dateKey = dailyDateKey();
+    races.start(room, { seed: dailySeed(dateKey), mode: 'daily', dateKey });
   });
 
   socket.on('startRace', () => {
@@ -107,6 +143,12 @@ function leaveCurrentRoom(socket) {
     const allDone = remaining.every((id) => room.race.progress.get(id).finished);
     if (remaining.length === 0 || allDone) races.endRace(room);
   }
+}
+
+// Persistent identity comes from the client; cap its length defensively.
+function sanitizePlayerId(playerId) {
+  if (typeof playerId !== 'string' || !playerId.trim()) return null;
+  return playerId.trim().slice(0, 64);
 }
 
 function findRoom(socketId) {

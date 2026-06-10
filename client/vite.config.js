@@ -23,6 +23,11 @@ export default defineConfig({
         ws: true,
         changeOrigin: true,
       },
+      // REST endpoints (leaderboard / daily) also live on the Node server.
+      '/api': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+      },
     },
   },
   build: {

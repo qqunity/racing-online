@@ -19,7 +19,8 @@ export default defineConfig({
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {
-    command: `npm run build && PORT=${PORT} npm start`,
+    // Fresh stats file per run so leaderboard assertions start from a known state.
+    command: `npm run build && rm -f .tmp/test-stats.json && PORT=${PORT} DATA_FILE=.tmp/test-stats.json npm start`,
     url: `http://localhost:${PORT}/healthz`,
     timeout: 120_000,
     reuseExistingServer: !process.env.CI,
