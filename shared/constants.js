@@ -46,7 +46,12 @@ export const ENTITY = {
   TRAFFIC: 'traffic',
   NITRO: 'nitro',
   OIL: 'oil',
+  SHIELD: 'shield', // blocks one crash
+  ATTACK: 'attack', // oil-bomb launched at the nearest opponent ahead
 };
+
+// Min interval between attack launches per player (server-enforced).
+export const ATTACK_COOLDOWN_MS = 3000;
 
 // Race lifecycle.
 export const COUNTDOWN_MS = 3000; // 3..2..1..GO

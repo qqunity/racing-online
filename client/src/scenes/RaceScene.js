@@ -402,6 +402,8 @@ function ghostTint(playerId) {
 function textureFor(e) {
   if (e.kind === ENTITY.NITRO) return 'pu-nitro';
   if (e.kind === ENTITY.OIL) return 'pu-oil';
+  if (e.kind === ENTITY.SHIELD) return 'pu-shield';
+  if (e.kind === ENTITY.ATTACK) return 'pu-attack';
   // Knuth multiplicative hash to scramble consecutive ids into a varied mix.
   const idx = ((e.id * 2654435761) >>> 0) % TRAFFIC_TEXTURES.length;
   return TRAFFIC_TEXTURES[idx];

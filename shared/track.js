@@ -34,17 +34,50 @@ export function generateTrack(seed) {
     // Occasionally drop a power-up / hazard into one of the free lanes.
     if (freeLanes.length > 0) {
       const roll = rng.next();
-      if (roll < 0.22) {
+      if (roll < 0.16) {
         entities.push({ id: id++, dist, lane: freeLanes[0], kind: ENTITY.NITRO });
-      } else if (roll < 0.42) {
+      } else if (roll < 0.32) {
         entities.push({ id: id++, dist, lane: freeLanes[0], kind: ENTITY.OIL });
+      } else if (roll < 0.42) {
+        entities.push({ id: id++, dist, lane: freeLanes[0], kind: ENTITY.SHIELD });
+      } else if (roll < 0.52) {
+        entities.push({ id: id++, dist, lane: freeLanes[0], kind: ENTITY.ATTACK });
       }
     }
 
     dist += MIN_GAP + Math.floor(rng.next() * (MAX_GAP - MIN_GAP));
   }
 
+  // Guaranteed spawns: every race must contain at least one shield and one
+  // attack so gameplay (and the E2E suite) never depends on roll luck. Uses the
+  // same seeded rng, so the result stays identical on client and server.
+  ensureKind(entities, rng, ENTITY.SHIELD);
+  ensureKind(entities, rng, ENTITY.ATTACK);
+
   return entities;
+}
+
+// If `kind` is absent, deterministically convert one nitro/oil pickup into it.
+// As a last resort (no convertible pickups at all — vanishingly rare) drop one
+// onto the empty starting runway, keeping the list sorted by dist.
+function ensureKind(entities, rng, kind) {
+  if (entities.some((e) => e.kind === kind)) return;
+  const candidates = entities.filter(
+    (e) => e.kind === ENTITY.NITRO || e.kind === ENTITY.OIL
+  );
+  if (candidates.length > 0) {
+    candidates[Math.floor(rng.next() * candidates.length)].kind = kind;
+    return;
+  }
+  const maxId = entities.reduce((m, e) => Math.max(m, e.id), -1);
+  const insert = {
+    id: maxId + 1,
+    dist: Math.floor(START_RUNWAY / 2) + (kind === ENTITY.ATTACK ? 60 : 0),
+    lane: Math.floor(rng.next() * LANES),
+    kind,
+  };
+  const at = entities.findIndex((e) => e.dist > insert.dist);
+  entities.splice(at === -1 ? entities.length : at, 0, insert);
 }
 
 // Fisher–Yates shuffle of lane indices using the seeded rng.
